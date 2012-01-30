@@ -1,0 +1,423 @@
+(in-package :pjs-utils)
+
+(defun sconc (&rest args)
+  "string joining with less typing !"
+  (apply #'concatenate (cons 'string args)))
+
+(defmacro sconc* (&environment env &rest args)
+  (let ((args (mapcar #'(lambda (arg)
+			  (macroexpand arg env))
+		      args)))
+    (if (every #'(lambda (x)
+		   (or (null x)
+		       (stringp x)))
+	       args)
+	(apply #'sconc args)
+	;; else
+	`(sconc ,@args))))
+
+;; why was this not included in cltl?
+(defmacro dovector ((element-name vector &key (index-name (gensym)) result)
+		    &body body)
+  (let ((vec-name (gensym)))
+    `(let ((,vec-name ,vector))
+       (dotimes (,index-name (length ,vec-name) ,result)
+	 (let ((,element-name (aref ,vec-name ,index-name)))
+	   ,@body)))))
+
+(defmacro 1++ (val)
+  "c for dummies!"
+  `(prog1
+       ,val
+     (setf ,val (1+ ,val))))
+
+;; =============================================
+;; idea from paul graham
+;; anaphoric if
+;; structured so that existing 'it' can be
+;; used in expression before being re-bound
+;; =============================================
+
+(defmacro aif (expression then else)
+  `(let ((it ,expression))
+     (if it
+	 ,then
+	 ,else)))
+
+;; =============================================
+;; anaphoric when
+;; =============================================
+
+(defmacro awhen (expression &body then)
+  `(let ((it ,expression))
+     (when it
+       ,@then)))
+
+
+;; nested backquote makes no sense!
+(defmacro with-hash-table-lookup ((name form) &body body)
+  (let ((table-name (gensym)))
+    `(let ((,table-name ,form))
+       (macrolet  ((,name (key)
+		     (list 'gethash key ',table-name)))
+	 ,@body))))
+
+;;(with-hash-table-lookup (foo (make-hash-table))
+;;  (foo 1)
+;;  (foo 3))
+
+(defmacro with-self-eval ((name form type) &body body)
+  (case type
+    (:hash
+     (let ((table-name (gensym)))
+       `(let ((,table-name ,form))
+	  (macrolet ((,name (key)
+		       (list 'gethash key ',table-name)))
+	    ,@body))))
+    (:array
+     (let ((array-name (gensym)))
+       `(let ((,array-name ,form))
+	  (macrolet ((,name (&rest subscripts)
+		       (list* 'aref ',array-name subscripts)))
+	    ,@body))))
+    ((t)
+     (error "bad type ~w" type))))
+
+;(with-self-eval (foo bar :array)
+;  (foo 5 8)
+;  (bar))
+
+
+
+;; =================================================
+;; onlisp p. 49
+;; =================================================
+
+(defun flatten (x)
+  (labels ((rec (x acc)
+	     (cond ((null x) acc)
+		   ((atom x) (cons x acc))
+		   (t (rec (car x)
+			   (rec (cdr x)
+				acc))))))
+    (rec x nil)))
+
+(defun null-string-p (str)
+  (or (null str)
+      (equal str "")))
+
+;; ===============================================
+;;
+;; ===============================================
+
+(define-symbol-macro []
+    (make-array 10 :adjustable t :fill-pointer 0))
+
+(define-symbol-macro {}
+    (make-hash-table :test 'equal))
+
+;; ===============================================
+;;
+;; ===============================================
+
+(defun join (join-str &rest sequences)
+  (let ((seq (remove-if #'null-string-p
+			(flatten sequences))))
+    (if seq
+	(let ((result (first seq)))
+	  (dolist (it (rest seq))
+	    (setf result (sconc result join-str it)))
+	  result)
+	;; else
+	"")))
+
+;; merges what it can at compile-time
+(defmacro join* (&environment env join-str &rest args)
+  (let ((args (remove-if #'null-string-p
+			 (mapcar #'(lambda (arg)
+				     (macroexpand arg env))
+				 args))))
+    (cond 
+      ((every #'stringp args)
+       (apply #'join join-str args))
+      ((null args)
+       "")
+      ((null (rest args))
+       `(or ,(first args)
+	    ""))
+      (t
+       `(join ,join-str ,@args)))))
+
+;; =============================================
+;; joins together forms with join-str, but assumes
+;; that every form will evaluate to something
+;; significant and safe to sconc
+;; ==============================================
+
+(defmacro join+ (join-str &rest forms)
+  (let (list)
+    (do ((x forms (cdr x)))
+	((not x))
+      (push (car x)
+	    list)
+      (when (cdr x)
+	(push join-str list)))
+  `(sconc ,@(reverse list))))
+
+(defun n-copies (n val)
+  (let (result)
+    (dotimes (i n)
+      (push val result))
+    result))
+
+(defun group (n seq)
+  (if (zerop n)
+      (error "0 length")
+      (do ((result nil)
+	   (chunk nil nil))
+	  ((not seq) (nreverse result))
+	(dotimes (i n)
+	  (push (car seq) chunk)
+	  (setf seq (cdr seq)))
+	(push (nreverse chunk) result))))
+
+(defun begins-with-p (str &rest patterns)
+  (let ((start 0)
+	(str-length (length str)))
+    (dolist (pattern patterns)
+      (let ((pattern-length (length pattern)))
+	(when (> (+ pattern-length start)
+		 str-length)
+	  ;(format t "pattern too long: (~a) (~a) (~a) (~a)~%" str start pattern pattern-length)
+	  (return-from begins-with-p nil))
+
+	(when (string/= str
+			pattern
+			:start1 start
+			:end1 (+ start pattern-length))
+	  ;(format t "pattern not equal (~a) (~a) (~a) (~a)~%" str start pattern pattern-length)
+	(return-from begins-with-p nil))
+      (incf start pattern-length))))
+  t)
+
+(defun ends-with-p (str &rest patterns)
+  (let ((start 0)
+	(end (length str)))
+    (dolist (pattern (reverse patterns))
+      (let ((pattern-length (length pattern)))
+	(when (< (- end pattern-length)
+		 start)
+	  (return-from ends-with-p nil))
+
+	(when (string/= str 
+			pattern
+			:start1 (- end pattern-length)
+			:end1 end)
+	  (return-from ends-with-p nil))
+	(decf end pattern-length)))
+    t))
+
+
+(defun make-comparator (greater-test equal-test lesser-test)
+  (lambda (x y)
+    (cond ((funcall greater-test x y)
+	   1)
+	  ((funcall equal-test x y)
+	   0)
+	  ((funcall lesser-test x y)
+	   -1)
+	  (t
+	   (error "contract failure for make-comparator: (~a) (~a) not <, >, or =" x y)))))
+	  
+(defun number-comparator (x y)
+  (- x y))
+
+(defmacro until (test &body body)
+  `(do ()
+       (,test)
+     ,@body))
+
+(defmacro while (test &body body)
+  `(until (not ,test)
+     ,@body))
+
+#|
+(while (not a)
+  (foo))
+
+(while a
+  (foo))
+
+(while (and (eq f g)
+	    (not h))
+  (bar))
+|#
+
+;; http://rosettacode.org/wiki/Binary_search#Common_Lisp
+(defun binary-search (value array &key (test (make-comparator #'< #'= #'>)))
+  (let ((low 0)
+        (high (1- (length array))))
+ 
+    (do ()
+	((< high low) nil)
+      (let* ((middle (floor (/ (+ low high) 2)))
+	     (middle-value (aref array middle))
+	     (test-result (funcall test
+				   middle-value
+				   value)))
+	  (cond ((> 0 test-result)
+		 (setf high (1- middle)))
+		
+		((= 0 test-result)
+		 (return middle-value))
+
+		((< 0 test-result)
+		 (setf low (1+ middle))))))))
+
+(defun only-one-of-p (variable values)
+  (let (found)
+    (dolist (v values)
+      (when (member v variable)
+	(if found
+	    (return-from only-one-of-p nil)
+	    ;; else
+	    (setf found v))))
+    found))
+
+;; lazy pair-wise equal
+(defmacro pair-equal (&rest args)
+  `(and ,@(mapcar #'(lambda (x)
+		      `(equal ,(first x) ,(second x)))
+		  (group 2 args))))
+
+;; delete and return the nth item from a list
+(defun pop-nth-helper (n previous)
+  (unless (< 0 n)
+    (error "pop-nth-helper only works for 0 < n"))
+
+  (do ()
+      ((= n 1))
+    (setf previous (cdr previous)
+	  n (1- n)))
+  (prog1
+      (cadr previous)
+    (setf (cdr previous) (cddr previous))))
+
+(defmacro pop-nth (n place)
+  `(let ((counter ,n))
+     (if (= counter 0)
+	 (pop ,place)
+	 ;; else
+	 (pop-nth-helper counter ,place))))
+
+(defun file-length-for-path (path)
+  (let ((pathname (sb-ext:parse-native-namestring path)))
+    (if (probe-file pathname)
+      (with-open-file (s pathname :direction :input)
+	(file-length s))
+      ;; else
+      (error "(~a) does not exist to take its length" path))))
+		 
+(defun trim (s)
+  (when s
+    (string-trim '(#\Space #\Newline #\Return #\Tab) s)))
+
+(defmacro ndelete (item place)
+  `(setf ,place (delete ,item ,place)))
+
+(defun read-number-from-string (s)
+  (let* ((*read-eval* nil)
+	 (result (read-from-string s)))
+    (when (numberp result)
+      result)))
+    
+
+;; =========================================================
+;;
+;; =========================================================
+
+(defmacro map-chars (key-form &body args)
+  (flet ((first-char (s)
+	   (if (stringp s)
+	       (aref s 0)
+	       s)))
+    `(case ,key-form
+       ,@(mapcar (lambda (char-case)
+		   (list (first-char (first char-case))
+			 (first-char (second char-case))))
+		 (group 2 args)))))
+
+#|
+(map-chars foo
+  "/" "_"
+  "}" "{"
+  "]" "["
+  t (error "bleh"))
+|#
+
+(defun first-after (it list)
+  (do ((p list (cdr p)))
+      ((or (null p)
+	   (eql (first p)
+		it))
+       (second p))))
+
+(defun filter (fn list)
+  (let (result)
+    (dolist (el list)
+      (awhen (funcall fn el)
+	(push it result)))
+    (nreverse result)))
+
+(defmacro rest-and-keywords ((rest &rest keywords) form &body body)
+  "DWIM for destructuring bind with both rest and keywords.
+
+file:///usr/share/doc/hyperspec/Body/03_dad.htm says that &key args also appear in your &rest arg, if you mix them. The described behaviour is retarded! This macro does the right thing by removing any of the named keywords from the start of 'form'. 'form' should be the name of your &rest arg, and normally you would use the same name for 'rest' so you can pretend that this isn't all necessary."
+  (flet ((keyword-name (word)
+	   (if (listp word)
+	       (if (listp (first word))
+		   (second (first word))
+		   ;; else
+		   (first word))
+	       ;; else
+	       word))
+	 (keyword-keyword (word)
+	   (if (listp word)
+	       (if (listp (first word))
+		   (first (first word))
+		   ;; else
+		   (intern (symbol-name (first word)) '#:keyword))
+	       ;; else
+	       (intern (symbol-name word) '#:keyword)))
+	 (keyword-default (word)
+	   (if (listp word)
+	       (second word)
+	       ;; else
+	       nil))
+	 (keyword-present (word)
+	   (if (and (listp word)
+		    (third word))
+	       (third word)
+	       ;; else
+	       nil)))
+    ;; end helpers
+    `(let ((,rest ,form)
+	   ,@(mapcar (lambda (word)
+		       (list (keyword-name word) (keyword-default word)))
+		     keywords)
+	   ,@(remove-if #'null
+			(mapcar #'keyword-present keywords)))
+       (while (member (first ,rest) ',(mapcar #'keyword-keyword keywords))
+	 ,@(mapcar (lambda (word)
+		     `(when (eq (first ,rest) ,(keyword-keyword word))
+			(pop ,rest)
+			(setf ,(keyword-name word)
+			      (pop ,rest))
+			;; and mark it present
+			,(when (keyword-present word)
+			       `(setf ,(keyword-present word)) t)))
+		   keywords))
+       ,@body)))
+
+(define-symbol-macro {} (make-hash-table :test 'equal))
+(define-symbol-macro [] (make-array 10 :adjustable t :fill-pointer 0))
