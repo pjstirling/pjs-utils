@@ -1,8 +1,8 @@
 (defpackage #:pjs-utils
   (:use :cl)
   (:export #:sconc
-	   #:sconc*
-           #:dovector
+	   #:dovector
+	   #:bind
            #:1++
            #:aif
            #:awhen
@@ -17,7 +17,7 @@
 
            #:join
            #:join+
-	   #:join*
+
            #:n-copies
            #:group
            #:begins-with-p
@@ -37,13 +37,17 @@
 	   #:filter
 	   #:map-chars
 	   #:rest-and-keywords
+	   #:explode
+	   #:partition
 
 	   #:symb
 	   #:gensymb
 	   #:make-keyword
 	   #:symbol-name*
 
+	   #:with-collector*
 	   #:with-collector
+	   #:with-collectors
 	   #:dolist-c
 	   #:dotimes-c
 	   #:while-c

@@ -1,7 +1,8 @@
 (asdf:defsystem #:pjs-utils
   :serial t
-  :depends-on ("bordeaux-threads" "trivial-backtrace")
+  :depends-on ()
   :components ((:file "package")
+	       (:file "macros")
                (:file "utils")
 	       (:file "symbols")
 	       (:file "collectors")))

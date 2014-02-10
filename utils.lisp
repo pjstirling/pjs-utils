@@ -4,17 +4,40 @@
   "string joining with less typing !"
   (apply #'concatenate (cons 'string args)))
 
-(defmacro sconc* (&environment env &rest args)
-  (let ((args (mapcar #'(lambda (arg)
-			  (macroexpand arg env))
-		      args)))
-    (if (every #'(lambda (x)
-		   (or (null x)
-		       (stringp x)))
-	       args)
-	(apply #'sconc args)
-	;; else
-	`(sconc ,@args))))
+(define-compiler-macro sconc (&environment env &rest args)
+  (compile-time-sconc env args))
+
+(defun compile-time-sconc (env args)
+  (let (args*
+	constant
+	(args (remove-if #'null-string-p
+			 (mapcar (lambda (arg)
+				   (macroexpand arg env))
+				 args))))
+    (flet ((emit-constant ()
+	     (when constant
+	       (push constant args*)
+	       (setf constant nil))))
+      (dolist (arg args)
+	(if (or (stringp arg)
+		(null arg))
+	    (if constant
+		(setf constant (concatenate 'string constant arg))
+		;; else
+		(setf constant arg))
+	    ;; else
+	    (progn
+	      (emit-constant)
+	      (push arg args*))))
+      (if args*
+	  (progn 
+	    (emit-constant)
+	    `(concatenate 'string ,@(nreverse args*)))
+	  ;; else
+	  (if constant
+	      constant
+	      ;; else
+	      "")))))
 
 ;; why was this not included in cltl?
 (defmacro dovector ((element-name vector &key (index-name (gensym)) result)
@@ -24,6 +47,54 @@
        (dotimes (,index-name (length ,vec-name) ,result)
 	 (let ((,element-name (aref ,vec-name ,index-name)))
 	   ,@body)))))
+
+(defmacro bind ((&rest bindings) &body body)
+  (setf body `(locally ,@body))
+  (let (let-bindings)
+    (labels ((add-let-binding (binding)
+	       (push binding let-bindings))
+	     (emit-let-bindings ()
+	       (when let-bindings
+		 (setf body
+		       `(let* ,let-bindings
+			  ,body))
+		 (setf let-bindings nil)))
+	     (ignored-var-p (sym)
+	       (ends-with-p (symbol-name sym)
+			    "-"))
+	     (emit-multi-var (sym binding)
+	       (destructuring-bind (type names value-form &optional declaration)
+		   binding
+		 (declare (ignore type))
+		 (let ((ignored-names (remove-if-not #'ignored-var-p names)))
+		   (setf body
+			 `(,sym ,names ,value-form
+				(declare (ignore ,@ignored-names))
+				,(when declaration
+				   declaration)
+				,body))))))
+      (dolist (binding (reverse bindings))
+	(if (listp binding)
+	    (case (first binding)
+	      (:mv
+	       (emit-let-bindings)
+	       (emit-multi-var 'multiple-value-bind binding))
+	      (:db
+	       (emit-let-bindings)
+	       (emit-multi-var 'destructuring-bind binding))
+	      (:progn
+		;; not a binding at all :)
+		(setf body
+		      `(progn
+			 ,@(rest binding)
+			 ,body)))
+	      (t
+	       (add-let-binding binding)))
+	    ;; else
+	    (add-let-binding binding)))
+      (emit-let-bindings)))
+  body)
+
 
 (defmacro 1++ (val)
   "c for dummies!"
@@ -120,33 +191,63 @@
 ;;
 ;; ===============================================
 
+(declaim (inline join))
 (defun join (join-str &rest sequences)
-  (let ((seq (remove-if #'null-string-p
-			(flatten sequences))))
+  (run-time-join join-str sequences))
+
+(defun run-time-join (join-str sequences)
+  (let ((seq (mapcar (lambda (str)
+		       (if (symbolp str)
+			   (symbol-name str)
+			   ;; else
+			   str))
+		     (remove-if #'null-string-p
+				(flatten sequences)))))
     (if seq
 	(let ((result (first seq)))
 	  (dolist (it (rest seq))
-	    (setf result (sconc result join-str it)))
+	    (setf result 
+		  (concatenate 'string result join-str it)))
 	  result)
 	;; else
 	"")))
 
-;; merges what it can at compile-time
-(defmacro join* (&environment env join-str &rest args)
-  (let ((args (remove-if #'null-string-p
-			 (mapcar #'(lambda (arg)
-				     (macroexpand arg env))
-				 args))))
-    (cond 
-      ((every #'stringp args)
-       (apply #'join join-str args))
-      ((null args)
-       "")
-      ((null (rest args))
-       `(or ,(first args)
-	    ""))
-      (t
-       `(join ,join-str ,@args)))))
+(defun compile-time-join (whole env join-str args)
+  (if (stringp join-str)
+      (let ((args (remove-if #'null-string-p
+			     (mapcar (lambda (arg)
+				       (macroexpand arg env))
+				     args)))
+	    args*
+	    constant)
+	(flet ((emit-constant ()
+		 (when constant
+		   (push constant args*)
+		   (setf constant nil))))
+	  (dolist (arg args)
+	    (if (stringp arg)
+		(if constant
+		    (setf constant (concatenate 'string constant join-str arg))
+		    ;; else
+		    (setf constant arg))
+		;; else
+		(progn
+		  (emit-constant)
+		  (push arg args*))))
+	  (if args*
+	      (progn
+		(emit-constant)
+		`(run-time-join ,join-str (list ,@(nreverse args*))))
+	      ;; else
+	      (if constant
+		  constant
+		  ;; else
+		  ""))))
+      ;; else non-constant join-str
+      whole))
+
+(define-compiler-macro join (&whole whole &environment env join-str &rest args)
+  (compile-time-join whole env join-str args))
 
 ;; =============================================
 ;; joins together forms with join-str, but assumes
@@ -232,27 +333,6 @@
 (defun number-comparator (x y)
   (- x y))
 
-(defmacro until (test &body body)
-  `(do ()
-       (,test)
-     ,@body))
-
-(defmacro while (test &body body)
-  `(until (not ,test)
-     ,@body))
-
-#|
-(while (not a)
-  (foo))
-
-(while a
-  (foo))
-
-(while (and (eq f g)
-	    (not h))
-  (bar))
-|#
-
 ;; http://rosettacode.org/wiki/Binary_search#Common_Lisp
 (defun binary-search (value array &key (test (make-comparator #'< #'= #'>)))
   (let ((low 0)
@@ -311,7 +391,8 @@
 	 (pop-nth-helper counter ,place))))
 
 (defun file-length-for-path (path)
-  (let ((pathname (sb-ext:parse-native-namestring path)))
+  (let ((pathname #+sbcl (sb-ext:parse-native-namestring path)
+		  #-sbcl (make-pathname path)))
     (if (probe-file pathname)
       (with-open-file (s pathname :direction :input)
 	(file-length s))
@@ -363,11 +444,11 @@
        (second p))))
 
 (defun filter (fn list)
-  (let (result)
+  (with-collector* (result)
     (dolist (el list)
       (awhen (funcall fn el)
-	(push it result)))
-    (nreverse result)))
+	(result it)))
+    (result)))
 
 (defmacro rest-and-keywords ((rest &rest keywords) form &body body)
   "DWIM for destructuring bind with both rest and keywords.
@@ -401,23 +482,59 @@ file:///usr/share/doc/hyperspec/Body/03_dad.htm says that &key args also appear 
 	       ;; else
 	       nil)))
     ;; end helpers
-    `(let ((,rest ,form)
-	   ,@(mapcar (lambda (word)
-		       (list (keyword-name word) (keyword-default word)))
-		     keywords)
-	   ,@(remove-if #'null
-			(mapcar #'keyword-present keywords)))
-       (while (member (first ,rest) ',(mapcar #'keyword-keyword keywords))
-	 ,@(mapcar (lambda (word)
-		     `(when (eq (first ,rest) ,(keyword-keyword word))
-			(pop ,rest)
-			(setf ,(keyword-name word)
-			      (pop ,rest))
-			;; and mark it present
-			,(when (keyword-present word)
-			       `(setf ,(keyword-present word)) t)))
-		   keywords))
-       ,@body)))
+    (let ((quit-flag (gensym)))
+      `(let ((,rest ,form)
+	     ,@(mapcar (lambda (word)
+			 (if (keyword-default word)
+			     (list (keyword-name word) (keyword-default word))
+			     ;; else
+			     (keyword-name word)))
+		       keywords)
+	     ,@(remove-if #'null
+			  (mapcar #'keyword-present keywords))
+	     ,quit-flag)
+	 (until (or (null ,rest)
+		    ,quit-flag)
+	   (if (keywordp (first ,rest))
+	       (let ((first (first ,rest)))
+		 (case first
+		   ,@(mapcar (lambda (word)
+			       `(,(keyword-keyword word)
+				 (setf ,(keyword-name word)
+				       (second ,rest))
+				 (setf ,rest (cddr ,rest))
+				 ;; mark it present
+				 ,(awhen (keyword-present word)
+				    `(setf ,it t))))
+		      keywords)
+		   (t
+		    (setf ,quit-flag t))))
+	       ;; else
+	       (setf ,quit-flag t)))
+	 ,@body))))
 
-(define-symbol-macro {} (make-hash-table :test 'equal))
-(define-symbol-macro [] (make-array 10 :adjustable t :fill-pointer 0))
+(defun explode (sep str)
+  (with-collector* (collect)
+    (let ((start 0)
+	  (end (length str)))
+      (while (< start end)
+	(let ((index (search sep str :start2 start)))
+	  (if index
+	      (progn
+		(collect (subseq str start index))
+		(setf start (+ index (length sep))))
+	      ;; else
+	      (progn
+		(collect (subseq str start))
+		(setf start end)))))
+      (collect))))
+
+(defun partition (fn list)
+  (with-collector* (yes)
+    (with-collector* (no)
+      (dolist (el list)
+	(if (funcall fn el)
+	    (yes el)
+	    ;; else
+	    (no el)))
+      (values (yes) (no)))))

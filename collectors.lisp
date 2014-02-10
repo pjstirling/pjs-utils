@@ -1,25 +1,19 @@
 (in-package #:pjs-utils)
 
+#+sbcl
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (require :sb-introspect))
 
 (defmacro with-collector ((name) &body body)
-  (let ((result (gensym "RESULT"))
-	(tail (gensym "TAIL"))
-	(func (gensym (symbol-name name))))
-    `(let* ((,result (cons nil nil))
-	    (,tail ,result))
-       (flet ((,func (arg)
-		(let ((new (cons arg nil)))
-		  (setf (cdr ,tail) new
-			,tail new))))
-	 (macrolet ((,name (&optional arg)
-		      (if arg
-			  (list ',func arg)
-			  ;; else
-			  '(cdr ,result))))
-	   ,@body
-	   (cdr ,result))))))
+  `(with-collector* (,name)
+     ,@body
+     (,name)))
+
+(defmacro with-collectors ((&rest names) &body body)
+  (let ((body `(progn ,@body)))
+    (dolist (name (reverse names))
+     (setf body `(with-collector* (,name) ,body)))
+    body))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun split-list (separator list &optional (test #'eq))
@@ -38,9 +32,8 @@
 	  (push chunk result)
 	  (setf list prefix)))
       (push list result)
-      (values-list result))))
+      (values-list result)))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
   (defun arg-names-for-macro-lambda-list (list)
     (when (< 1 (count '&environment list))
       (error "multiple &environment"))
@@ -108,6 +101,7 @@
 	      (push var result))))
       result)))
 
+#+sbcl
 (defmacro define-collector (form-name)
   (let* ((args (sb-introspect:function-lambda-list form-name))
 		    (arg-names (arg-names-for-macro-lambda-list args))
@@ -120,11 +114,18 @@
 		  (list 'with-collector '(collect)
 			(list* ',form-name (rest ,whole))))))
 
+#-sbcl
+(defmacro define-collector (form)
+  (let ((name (symb form "-c")))
+    `(defmacro ,name (&rest args)
+       (list 'with-collector '(collect)
+	     (list* ',form args)))))
+
 (defmacro define-collectors (&rest form-names)
   `(progn
      ,@(mapcar #'(lambda (form)
 		   `(define-collector ,form))
 	       form-names)))
 
-(define-collectors while until dolist dotimes)
+(define-collectors while until dolist dotimes dovector)
 
