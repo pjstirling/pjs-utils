@@ -392,7 +392,7 @@
 
 (defun file-length-for-path (path)
   (let ((pathname #+sbcl (sb-ext:parse-native-namestring path)
-		  #-sbcl (make-pathname path)))
+		  #-sbcl (make-pathname :name path)))
     (if (probe-file pathname)
       (with-open-file (s pathname :direction :input)
 	(file-length s))
