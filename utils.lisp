@@ -73,6 +73,8 @@
 				,(when declaration
 				   declaration)
 				,body))))))
+      ;; we progressively wrap the body from the inner-most, (which is the last binding)
+      ;; to the outer-most (which is the first). hence reverse
       (dolist (binding (reverse bindings))
 	(if (listp binding)
 	    (case (first binding)
