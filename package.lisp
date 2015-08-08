@@ -50,6 +50,7 @@
 	   #:with-collectors
 	   #:dolist-c
 	   #:dotimes-c
+	   #:dovector-c
 	   #:while-c
 	   #:until-c
 	   #:collect

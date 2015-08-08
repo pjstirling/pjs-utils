@@ -386,11 +386,17 @@
     (setf (cdr previous) (cddr previous))))
 
 (defmacro pop-nth (n place)
-  `(let ((counter ,n))
-     (if (= counter 0)
-	 (pop ,place)
-	 ;; else
-	 (pop-nth-helper counter ,place))))
+  (let ((counter (gensym)))
+    `(let ((,counter ,n))
+       (if (= ,counter 0)
+	   (pop ,place)
+	   ;; else
+	   (pop-nth-helper ,counter ,place)))))
+
+(defun test-pop-nth ()
+  (dotimes (i 10)
+    (let ((list (list 0 1 2 3 4 5 6 7 8 9)))
+      (format t "~a ~w~%" (pop-nth i list) list))))
 
 (defun file-length-for-path (path)
   (let ((pathname #+sbcl (sb-ext:parse-native-namestring path)
