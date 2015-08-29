@@ -86,6 +86,7 @@
 	       (emit-multi-var 'destructuring-bind binding))
 	      (:progn
 		;; not a binding at all :)
+		(emit-let-bindings)
 		(setf body
 		      `(progn
 			 ,@(rest binding)
