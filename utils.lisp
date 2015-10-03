@@ -69,9 +69,11 @@
 		 (let ((ignored-names (remove-if-not #'ignored-var-p names)))
 		   (setf body
 			 `(,sym ,names ,value-form
-				(declare (ignore ,@ignored-names))
-				,(when declaration
-				   declaration)
+				;; yes ugly
+				,@ (when ignored-names
+				     (list `(declare (ignore ,@ignored-names))))
+				,@(when declaration
+				    (list declaration))
 				,body))))))
       ;; we progressively wrap the body from the inner-most, (which is the last binding)
       ;; to the outer-most (which is the first). hence reverse
@@ -91,6 +93,14 @@
 		      `(progn
 			 ,@(rest binding)
 			 ,body)))
+	      (:slots
+	       (emit-let-bindings)
+	       (setf body
+		     `(with-slots ,(second binding) ,(third binding)
+			,body)))
+	      (:symbols
+	       (dolist (sym (rest binding))
+		 (add-let-binding `(,sym (gensym ,(sconc (symbol-name sym) "-"))))))
 	      (t
 	       (add-let-binding binding)))
 	    ;; else
