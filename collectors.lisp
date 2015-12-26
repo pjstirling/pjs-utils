@@ -111,6 +111,8 @@
 				(gensym))))
 	       `(defmacro ,(symb form-name "-c") (&whole ,whole ,@args)
 		  (declare (ignore ,@(remove whole arg-names)))
+		  `(with-collector (collect)
+		     (,',form-name ,@(rest ,whole)))
 		  (list 'with-collector '(collect)
 			(list* ',form-name (rest ,whole))))))
 

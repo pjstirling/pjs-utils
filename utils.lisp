@@ -261,14 +261,12 @@
       (let ((pattern-length (length pattern)))
 	(when (> (+ pattern-length start)
 		 str-length)
-	  ;(format t "pattern too long: (~a) (~a) (~a) (~a)~%" str start pattern pattern-length)
 	  (return-from begins-with-p nil))
 
 	(when (string/= str
 			pattern
 			:start1 start
 			:end1 (+ start pattern-length))
-	  ;(format t "pattern not equal (~a) (~a) (~a) (~a)~%" str start pattern pattern-length)
 	(return-from begins-with-p nil))
       (incf start pattern-length))))
   t)
