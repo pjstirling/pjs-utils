@@ -3,6 +3,7 @@
   (:export #:sconc
 	   #:dovector
 	   #:bind
+	   #:maybe-wrap-body
            #:1++
            #:aif
            #:awhen
@@ -24,6 +25,9 @@
            #:ends-with-p
            #:until
            #:while
+	   #:->
+	   #:->>
+	   #:megaexpand
            #:binary-search
            #:only-one-of-p
            #:pair-equal
@@ -39,7 +43,8 @@
 	   #:rest-and-keywords
 	   #:explode
 	   #:partition
-
+	   #:range
+	   
 	   #:symb
 	   #:gensymb
 	   #:make-keyword

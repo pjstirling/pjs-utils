@@ -1,6 +1,11 @@
 (in-package :pjs-utils)
 
-
+(defun range (n &key (start 0))
+  "Return a list of N elements starting at START."
+  (with-collector* (collect)
+    (dotimes (i n)
+      (collect (+ i start)))
+    (collect)))
 
 ;; why was this not included in cltl?
 (defmacro dovector ((element-name vector &key (index-name (gensym)) result)
@@ -11,8 +16,15 @@
 	 (let ((,element-name (aref ,vec-name ,index-name)))
 	   ,@body)))))
 
+(defun maybe-wrap-body (sym body)
+  "Wrap BODY (a list) in a SYM form, if it isn't a sole element."
+  (if (rest body)
+      `(,sym ,@body)
+      ;; else
+      (first body)))
+
 (defmacro bind ((&rest bindings) &body body)
-  (setf body `(locally ,@body))
+  (setf body (maybe-wrap-body 'locally body))
   (let (let-bindings)
     (labels ((add-let-binding (binding)
 	       (push binding let-bindings))
@@ -32,9 +44,8 @@
 		 (let ((ignored-names (remove-if-not #'ignored-var-p names)))
 		   (setf body
 			 `(,sym ,names ,value-form
-				;; yes ugly
 				,@ (when ignored-names
-				     (list `(declare (ignore ,@ignored-names))))
+				     `((declare (ignore ,@ignored-names))))
 				,@(when declaration
 				    (list declaration))
 				,body))))))
@@ -71,7 +82,6 @@
       (emit-let-bindings)))
   body)
 
-
 (defmacro 1++ (val)
   "c for dummies!"
   `(prog1
@@ -100,14 +110,14 @@
      (when it
        ,@then)))
 
-
-;; nested backquote makes no sense!
 (defmacro with-hash-table-lookup ((name form) &body body)
-  (let ((table-name (gensym)))
-    `(let ((,table-name ,form))
-       (macrolet  ((,name (key)
-		     (list 'gethash key ',table-name)))
-	 ,@body))))
+  "Binds FORM (which should be a hash table) using NAME for both a
+variable and a macro that invokes GETHASH (letting the hash table look
+self-evaluating)."
+  `(let ((,name ,form))
+     (macrolet ((,name (key)
+		  `(gethash ,key ,',name)))
+       ,@body)))
 
 ;;(with-hash-table-lookup (foo (make-hash-table))
 ;;  (foo 1)
@@ -184,42 +194,54 @@
 	;; else
 	"")))
 
-(defun compile-time-join (whole env join-str args)
-  (if (stringp join-str)
-      (let ((args (remove-if #'null-string-p
-			     (mapcar (lambda (arg)
-				       (macroexpand arg env))
-				     args)))
-	    args*
-	    constant)
-	(flet ((emit-constant ()
-		 (when constant
-		   (push constant args*)
-		   (setf constant nil))))
-	  (dolist (arg args)
-	    (if (stringp arg)
-		(if constant
-		    (setf constant (concatenate 'string constant join-str arg))
-		    ;; else
-		    (setf constant arg))
+(defun compile-time-join (env join-str args)
+  (let ((args (remove-if #'null-string-p
+			 (mapcar (lambda (arg)
+				   (megaexpand arg env))
+				 args)))
+	args*
+	constant)
+    (flet ((emit-constant ()
+	     (when constant
+	       (push constant args*)
+	       (setf constant nil))))
+      (dolist (arg args)
+	(if (stringp arg)
+	    (if constant
+		(setf constant (concatenate 'string constant join-str arg))
 		;; else
-		(progn
-		  (emit-constant)
-		  (push arg args*))))
-	  (if args*
-	      (progn
-		(emit-constant)
-		`(run-time-join ,join-str (list ,@(nreverse args*))))
+		(setf constant arg))
+	    ;; else
+	    (progn
+	      (emit-constant)
+	      (push arg args*))))
+      (if args*
+	  (progn
+	    (emit-constant)
+	    `(run-time-join ,join-str (list ,@(nreverse args*))))
+	  ;; else
+	  (if constant
+	      constant
 	      ;; else
-	      (if constant
-		  constant
-		  ;; else
-		  ""))))
-      ;; else non-constant join-str
-      whole))
+	      "")))))
 
 (define-compiler-macro join (&whole whole &environment env join-str &rest args)
-  (compile-time-join whole env join-str args))
+  (let ((args (mapcar (lambda (form)
+			(megaexpand form env))
+		      args)))
+    (cond
+      ((null args)
+       "")
+      ((null (cdr args))
+       (if (stringp (first args))
+	   (first args)
+	   ;; else
+	   `(coerce ,(first args) 'string)))
+      ((stringp join-str)
+       (compile-time-join env join-str args))
+      ;; else defer everything to run-time
+      (t
+       whole))))
 
 ;; =============================================
 ;; joins together forms with join-str, but assumes
@@ -344,7 +366,6 @@
 (defun pop-nth-helper (n previous)
   (unless (< 0 n)
     (error "pop-nth-helper only works for 0 < n"))
-
   (do ()
       ((= n 1))
     (setf previous (cdr previous)
@@ -429,7 +450,12 @@
 (defmacro rest-and-keywords ((rest &rest keywords) form &body body)
   "DWIM for destructuring bind with both rest and keywords.
 
-file:///usr/share/doc/hyperspec/Body/03_dad.htm says that &key args also appear in your &rest arg, if you mix them. The described behaviour is retarded! This macro does the right thing by removing any of the named keywords from the start of 'form'. 'form' should be the name of your &rest arg, and normally you would use the same name for 'rest' so you can pretend that this isn't all necessary."
+file:///usr/share/doc/hyperspec/Body/03_dad.htm says that &key args
+also appear in your &rest arg, if you mix them. The described
+behaviour is retarded! This macro does the right thing by removing any
+of the named keywords from the start of 'form'. 'form' should be the
+name of your &rest arg, and normally you would use the same name for
+'rest' so you can pretend that this isn't all necessary."
   (flet ((keyword-name (word)
 	   (if (listp word)
 	       (if (listp (first word))

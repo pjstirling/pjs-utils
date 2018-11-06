@@ -12,7 +12,7 @@
 	constant
 	(args (remove-if #'null-string-p
 			 (mapcar (lambda (arg)
-				   (macroexpand arg env))
+				   (megaexpand arg env))
 				 args))))
     (flet ((emit-constant ()
 	     (when constant
@@ -41,5 +41,6 @@
 
 (defun null-string-p (str)
   (or (null str)
-      (equal str "")))
+      (and (stringp str)
+	   (= 0 (length str)))))
 
