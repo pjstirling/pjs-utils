@@ -1,6 +1,7 @@
 (defpackage #:pjs-utils
   (:use :cl)
   (:export #:sconc
+	   #:dohash
 	   #:dovector
 	   #:bind
 	   #:maybe-wrap-body

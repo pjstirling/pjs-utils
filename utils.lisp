@@ -7,6 +7,13 @@
       (collect (+ i start)))
     (collect)))
 
+(defmacro dohash ((k v hash) &body body)
+  `(block nil
+     (maphash (lambda (,k ,v)
+		(declare (ignorable ,k ,v))
+		,@body)
+	      ,hash)))
+
 ;; why was this not included in cltl?
 (defmacro dovector ((element-name vector &key (index-name (gensym)) result)
 		    &body body)
